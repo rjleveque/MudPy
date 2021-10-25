@@ -4,7 +4,7 @@ D. Melgar 02/2014
 Forward modeling routines
 '''
 
-from numba import jit
+#from numba import jit
 
 
 
