@@ -34,6 +34,15 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
     import multiprocessing
     from multiprocessing import Process, current_process
     import time
+
+
+    # Need to make tauPy file  (Could move this to initialization?)
+    print('Creating tauPy file...')
+    vel_mod_file=home+project_name+'/structure/'+model_name
+    fakequakes.build_TauPyModel(home,project_name,vel_mod_file,
+                                background_model='PREM')
+
+
     
     print("multiprocessing: Using %s CPUs" % ncpus)
 
@@ -81,7 +90,6 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
             rseed = random.randint(100000,10000000,1)
             realization.rseed = rseed
             print('*** Generated random seed, but may not be distinct')
-        print('+++ Mw = %s, rname = %s,   seed = %15i' % (current_target_Mw,rname,rseed))
         random.seed(rseed)  # initialize random number generator
         
         #Prepare output
@@ -92,7 +100,6 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
         #Sucess criterion
         success=False
         while success==False:
-            print('+++ in loop with success = ',success)
             #Select only a subset of the faults based on magnitude scaling
             
             ifaults,hypo_fault,Lmax,Wmax,Leff,Weff=fakequakes.select_faults(whole_fault,Dstrike,Ddip,current_target_Mw,num_modes,scaling_law,
@@ -173,7 +180,6 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
                 #Generate fake slip pattern
 #                    slip,success=make_KL_slip(fault_array,num_modes,eigenvals,V,mean_slip_log,max_slip,lognormal=True,seed=kfault)
                 slip,success=fakequakes.make_KL_slip(fault_array,num_modes,eigenvals,V,mean_slip_log,max_slip,lognormal=True,seed=12345)
-                print('+++ after call to make_KL_slip, success = ',success)
         
             #Slip pattern sucessfully made, moving on.
             #Rigidities
@@ -209,7 +215,6 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
                 success=False
                 print('... ... ... max slip condition violated due to force_magnitude=True, recalculating...')
         
-            print('+++ end of loop, success = ',success)
         
         #Get stochastic rake vector
         stoc_rake=fakequakes.get_stochastic_rake(rake,len(slip))
@@ -334,8 +339,8 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
                 time.sleep(2)
 
                 for realization in caseproc[procnum]:
-                    print("\nProcess %s now generating this rupture: %s" \
-                            % (p.pid, realization.rname))
+                    print("\nProcess %s now generating this rupture: %s, seed=%s" \
+                            % (p.pid, realization.rname, realization.rseed))
                     generate_one_rupture(realization)
                     
             plist = [Process(target=run_cases, args=(p,)) for p in range(nprocs)]
@@ -360,3 +365,12 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
 
     generate_all_ruptures(realizations, ncpus)
 
+    # write names to ruptures.list (append to old list)
+    fname = home+project_name+'/data/ruptures.list'
+    with open(fname, 'a') as f:
+        for realization in realizations:
+            rname = realization.rname
+            f.write('%s\n' % rname)
+    print('Appended %i realizations to %s' % (len(realizations), fname))
+    print('Ruptures are in %s' % home+project_name+'/ruptures')
+        
