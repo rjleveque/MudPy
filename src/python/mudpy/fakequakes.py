@@ -452,7 +452,7 @@ def get_eigen(C):
     return eigenvals,V
     
     
-def make_KL_slip(fault,num_modes,eigenvals,V,mean_slip,max_slip,lognormal=True,maxiter=5,seed=12345):
+def make_KL_slip(fault,num_modes,eigenvals,V,mean_slip,max_slip,lognormal=True,maxiter=5,seed=None):
     '''
     Make slip map using num_modes
     '''
@@ -466,10 +466,8 @@ def make_KL_slip(fault,num_modes,eigenvals,V,mean_slip,max_slip,lognormal=True,m
 
     
     while True:
-        #Generate random numbers
-            #Is there a seed?
-        if seed != None:
-            random_seed(seed)
+        #Generate random numbers - 
+        # Do not set seed here: want new z for each realization!
         if len(fault)>num_modes:
             z = randn(num_modes) 
         else: #if fewer faults than requested modes then use all modes
