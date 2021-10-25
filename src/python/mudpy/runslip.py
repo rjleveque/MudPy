@@ -3,6 +3,16 @@ Diego Melgar, 01/2014
 Runtime file for forward modeling and inverse kinematic slip inversions
 '''
 
+# Need environment to pass into Popen with paths set for 
+# importing mudpy and running fk.pl
+import os,sys
+MUD = os.environ['MUD']
+fkdir = '%s/src/fk/' % MUD
+mud_env = os.environ.copy()
+mud_env['PATH'] = mud_env['PATH'] + ':' + fkdir
+mud_env['PYTHONPATH'] = mud_env['PYTHONPATH'] + ':' + '%s/src/python' % MUD
+print('+++ Will call Popen with PATH = ',mud_env['PATH'])
+print('+++ and PYTHONPATH = ',mud_env['PYTHONPATH'])
 
 #Initalize project folders
 def init(home,project_name):
@@ -243,7 +253,7 @@ def make_parallel_green(home,project_name,station_file,fault_name,model_name,dt,
         mpi='mpiexec -n '+str(ncpus)+' python '+mud_source+'parallel.py run_parallel_green '+home+' '+project_name+' '+station_file+' '+model_name+' '+str(dt)+' '+str(NFFT)+' '+str(static)+' '+str(dk)+' '+str(pmin)+' '+str(pmax)+' '+str(kmax)+' '+str(tsunami)+' '+str(insar)
         print(mpi)
         mpi=split(mpi)
-        p=subprocess.Popen(mpi)
+        p=subprocess.Popen(mpi, env=mud_env)
         p.communicate()
         
         
@@ -308,7 +318,7 @@ def make_parallel_teleseismics_green(home,project_name,station_file,fault_name,m
     mpi='mpiexec -n '+str(ncpus)+' python '+mud_source+'parallel.py run_parallel_teleseismics_green '+home+' '+project_name+' '+str(time_epi)+' '+station_file+' '+model_name+' '+teleseismic_vel_mod+' '+str(endtime)
     print(mpi)
     mpi=split(mpi)
-    p=subprocess.Popen(mpi)
+    p=subprocess.Popen(mpi, env=mud_env)
     p.communicate()
         
         
@@ -412,7 +422,7 @@ def make_parallel_synthetics(home,project_name,station_file,fault_name,model_nam
     mpi='mpiexec -n '+str(ncpus)+' python '+mud_source+'parallel.py run_parallel_synthetics '+home+' '+project_name+' '+station_file+' '+model_name+' '+str(integrate)+' '+str(static)+' '+str(tsunami)+' '+str(time_epi)+' '+str(beta)+' '+str(custom_stf)+' '+str(impulse)+' '+str(insar)+' '+str(okada)+' '+str(mu)
     print(mpi)
     mpi=split(mpi)
-    p=subprocess.Popen(mpi)
+    p=subprocess.Popen(mpi, env=mud_env)
     p.communicate()
         
        
