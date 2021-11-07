@@ -370,7 +370,7 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
     with open(fname, 'a') as f:
         for realization in realizations:
             rname = realization.rname
-            f.write('%s\n' % rname)
+            f.write('%s.rupt\n' % rname)
     print('Appended %i realizations to %s' % (len(realizations), fname))
     print('Ruptures are in %s' % home+project_name+'/ruptures')
         
