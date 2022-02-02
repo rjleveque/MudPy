@@ -259,8 +259,8 @@ def waveforms_matrix(home,project_name,fault_name,rupture_name,station_file,GF_l
 
 def waveforms_fakequakes(home,project_name,fault_name,rupture_list,GF_list,
                 model_name,run_name,dt,NFFT,G_from_file,G_name,source_time_function='dreger',zeta=0.2,
-                stf_falloff_rate=4.0,rupture_name=None,epicenter=None,time_epi=None,
-                hot_start=0):
+                stf_falloff_rate=4.0,rupture_name=None,epicenter=None,time_epi=None,hot_start=0,
+                ncpus=1):
     '''
     To supplant waveforms_matrix() it needs to include resmapling and all that jazz...
     
@@ -285,7 +285,10 @@ def waveforms_fakequakes(home,project_name,fault_name,rupture_list,GF_list,
         Nothing
     '''
     from numpy import genfromtxt,array
+    from obspy import UTCDateTime
     import datetime
+    import time
+    from dask.distributed import Client
     
     print('Solving for kinematic problem(s)')
     #Time for log file
@@ -301,43 +304,182 @@ def waveforms_fakequakes(home,project_name,fault_name,rupture_list,GF_list,
         all_sources = array(all_sources, ndmin=1)  # in case only 1 entry
 
     
+    
+    
     #Load all synthetics
     print('... loading all synthetics into memory')
-    Nss,Ess,Zss,Nds,Eds,Zds=load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,G_from_file,G_name)
+    Nss,Ess,Zss,Nds,Eds,Zds=load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,
+                                                       G_from_file,G_name)
+    print('... ... ... done')
+    
+
+    # Need to know how many sites and delta t
+    station_file=home+project_name+'/data/station_info/'+GF_list
+    staname=genfromtxt(station_file,dtype="U",usecols=0)
+    Nsta=len(staname)
+    dt = Nss[0].stats.delta
+    
+    # Need epicetrnal time from log file to trim synthetics
+    print('... reading epicentral time from log file. REMEMBER: All ruptures in ruptures.list should have a common epicentral time')
+    log_file = home + project_name + '/output/ruptures/' + all_sources[0].replace('.rupt','.log')
+    flog = open(log_file,'r')
+    while True:
+        line = flog.readline()
+        if 'Hypocenter time' in line:                
+            hypocenter_time = line.replace('Hypocenter time: ','')
+            hypocenter_time = UTCDateTime(hypocenter_time)
+            break
+        elif line == '':
+            break 
+    flog.close()
+    
+    #Now get the impulse response G for all sites and all subfaults
+    print('... broadcast to G matrix')
+    Gimpulse_all = stream2matrix(Nss,Ess,Zss,Nds,Eds,Zds,hypocenter_time,Nsta)
     print('... ... done')
+    
+    #clean up
+    print('... clean up: removing obspy streams from memory')
+    del Nss,Ess,Zss,Nds,Eds,Zds
+    print('... ... done')
+    
+    # print('... opening DASK client')
+    # client = Client(n_workers=ncpus)
+    
     
     #Now loop over rupture models
     for ksource in range(hot_start,len(all_sources)):
-        print('... solving for source '+str(ksource)+' of '+str(len(all_sources)))
-        rupture_name=all_sources[ksource]
-        print(rupture_name)
+       
+        rupture_name = all_sources[ksource]
+        print('... solving for source '+str(ksource)+' of '+str(len(all_sources))+': '+rupture_name)
         
-        if rupture_list!=None:
+        if rupture_list != None:
             #Get epicentral time
-            epicenter,time_epi=read_fakequakes_hypo_time(home,project_name,rupture_name)
-            forward=False
+            epicenter,time_epi = read_fakequakes_hypo_time(home,project_name,rupture_name)
+            forward = False
         else:
-            forward=True #This controls where we look for the rupture file
+            forward = True #This controls where we look for the rupture file
         
         # Put in matrix
-        m,G=get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_name,time_epi,GF_list,epicenter,NFFT,source_time_function,stf_falloff_rate,zeta,forward=forward)
+        t1=time.time()
+        # m,G=get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_name,time_epi,GF_list,epicenter,NFFT,source_time_function,stf_falloff_rate,zeta,forward=forward)
+        m,G = get_fakequakes_G_and_m(Gimpulse_all,home,project_name,rupture_name,time_epi,GF_list,
+                                   epicenter,NFFT,source_time_function,stf_falloff_rate,zeta=zeta,
+                                   forward=forward,dt=dt,ncpus=ncpus,reconvolution=False)
+        t2=time.time()
+        print('... ... slip rate convolutions completed: wall time {:.1f}s'.format(t2-t1))
         # Solve
-        waveforms=G.dot(m)
+        print('... ... solve for waveforms (ncpus = %d)' % ncpus)
+        waveforms = G.dot(m)
         #Write output
         write_fakequakes_waveforms(home,project_name,rupture_name,waveforms,GF_list,NFFT,time_epi,dt)
+        print('... ... finished with this rupture')
+        
+    # print('... clean up: closing distributed client')
+    # client.close()
+        
+   
+    
+   
+def stream2matrix(Nss,Ess,Zss,Nds,Eds,Zds,hypocenter_time,Nsta):
+    '''
+    
+    Converts stream objects to a properly formatted G matrix
+
+    Parameters
+    ----------
+    Nss,Ess ... : Stream objects with synthetics for each component of motion and
+                    for the ss and ds rake angles
+
+
+    hypocenter_time : UTCDateTime object with hypocentral timne, it's used to troim
+        the syntehtics to a single, common time
+
+    Nsta : int, number of stations being processed
+
+
+    Returns
+    -------
+    G = [ Nss_sta1_sf1 Nds sta1_ sf1     Nss_sta1_sf2 Nds sta1_ sf2 ...
+          Ess_sta1_sf1 Eds sta1_ sf1     Nss_sta1_sf3 Nds sta1_ sf3 ...
+          Zss_sta1_sf1 Zds sta1_ sf1     Nss_sta1_sf3 Nds sta1_ sf3 ...
+          Nss_sta2_sf1 Nds sta2_ sf1
+          Ess_sta2_sf1 Eds sta2_ sf1
+          Zss_sta2_sf1 Zds sta2_ sf1
+          ...
+
+    '''    
+    
+    from numpy import ones
+    
+    #How many time points in snthethics
+    Npts = Nss[0].stats.npts
+    
+    #How many sources?
+    Nsources = int(len(Nss) / Nsta)
+    
+    #Initalize G matrix
+    G = ones((Npts*Nsta*3,2*Nsources))
+    
+    k=0
+    row_start = 0
+    row_end = Npts
+    for ksta in range(Nsta):
+        for ksub in range(Nsources):
+            
+
+            
+            #Assign individual GFs
+            nss =  Nss[k]
+            ess =  Ess[k]
+            zss =  Zss[k]
+            
+            nds =  Nds[k]
+            eds =  Eds[k]
+            zds =  Zds[k]
+            
+            # Trim to hypocentral time and pad
+            nss = trim_to_hypo_time_and_pad(nss,hypocenter_time,Npts)
+            ess = trim_to_hypo_time_and_pad(ess,hypocenter_time,Npts)
+            zss = trim_to_hypo_time_and_pad(zss,hypocenter_time,Npts)
+
+            nds = trim_to_hypo_time_and_pad(nds,hypocenter_time,Npts)
+            eds = trim_to_hypo_time_and_pad(eds,hypocenter_time,Npts)
+            zds = trim_to_hypo_time_and_pad(zds,hypocenter_time,Npts)
+            
+            # Done, now place in correct position in matrix
+            G[row_start:row_end,2*ksub] = nss
+            G[row_start:row_end,2*ksub+1] = nds
+            
+            G[row_start+Npts:row_end+Npts,2*ksub] = ess
+            G[row_start+Npts:row_end+Npts,2*ksub+1] = eds
+    
+            G[row_start+2*Npts:row_end+2*Npts,2*ksub] = zss
+            G[row_start+2*Npts:row_end+2*Npts,2*ksub+1] = zds
+            
+            k += 1
+    
+        row_start += 3*Npts
+        row_end += 3*Npts
+    
+    return G
         
         
+
+  
         
         
 def tele_waveforms(home,project_name,fault_name,rupture_list,GF_list_teleseismic,
                 model_name,run_name,G_from_file,G_name,source_time_function='dreger',zeta=0.2,
                 stf_falloff_rate=4.0,rupture_name=None,epicenter=None,time_epi=None,
-                hot_start=0,decimation_factor=1):
+                hot_start=0,decimation_factor=1,reconvolution=True,ncpus=1):
     '''
 
     '''
     from numpy import genfromtxt,array
     import datetime
+    import gc
+    from obspy import UTCDateTime
     
     print('Solving for kinematic problem(s)')
     #Time for log file
@@ -355,13 +497,44 @@ def tele_waveforms(home,project_name,fault_name,rupture_list,GF_list_teleseismic
     Nss,Ess,Zss,Nds,Eds,Zds=load_fakequakes_tele_synthetics(home,project_name,fault_name,model_name,GF_list_teleseismic,G_from_file,G_name,decimation_factor)
     print('... ... done')
     
+    
+    # Need to know how many sites and delta t
+    station_file=home+project_name+'/data/station_info/'+GF_list_teleseismic
+    staname=genfromtxt(station_file,dtype="U",usecols=0)
+    Nsta=len(staname)
     Npoints=Nss[0].stats.npts
     dt=Nss[0].stats.delta
+    
+    # Need epicetrnal time from log file to trim synthetics
+    print('... reading epicentral time from log file. REMEMBER: All ruptures in ruptures.list should have a common epicentral time')
+    log_file = home + project_name + '/output/ruptures/' + all_sources[0].replace('.rupt','.log')
+    flog = open(log_file,'r')
+    while True:
+        line = flog.readline()
+        if 'Hypocenter time' in line:                
+            hypocenter_time = line.replace('Hypocenter time: ','')
+            hypocenter_time = UTCDateTime(hypocenter_time)
+            break
+        elif line == '':
+            break 
+    flog.close()
+    
+    #Now get the impulse response G for all sites and all subfaults
+    print('... broadcast to G matrix')
+    Gimpulse_all = stream2matrix(Nss,Ess,Zss,Nds,Eds,Zds,hypocenter_time,Nsta)
+    print('... ... done')
+    
+    #clean up
+    print('... clean up: removing obspy streams from memory')
+    del Nss,Ess,Zss,Nds,Eds,Zds
+    print('... ... done')
+    
+    
     #Now loop over rupture models
     for ksource in range(hot_start,len(all_sources)):
         print('... solving for source '+str(ksource)+' of '+str(len(all_sources)))
         rupture_name=all_sources[ksource]
-        print(rupture_name)
+        print('... ... '+rupture_name)
         
         if rupture_list!=None:
             #Get epicentral time
@@ -371,11 +544,17 @@ def tele_waveforms(home,project_name,fault_name,rupture_list,GF_list_teleseismic
             forward=True #This controls where we look for the rupture file
         
         # Put in matrix
-        m,G=get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_name,time_epi,GF_list_teleseismic,epicenter,Npoints,source_time_function,stf_falloff_rate,zeta,forward=forward)
+        m,G = get_fakequakes_G_and_m(Gimpulse_all,home,project_name,rupture_name,time_epi,GF_list_teleseismic,
+                                   epicenter,Npoints,source_time_function,stf_falloff_rate,zeta=zeta,
+                                   forward=forward,dt=dt,ncpus=ncpus,reconvolution=True)
         # Solve
         waveforms=G.dot(m)
         #Write output
         write_fakequakes_waveforms(home,project_name,rupture_name,waveforms,GF_list_teleseismic,Npoints,time_epi,dt)
+        
+        #Delete variables and garbage collect
+        del G
+        gc.collect()
         
 
 
@@ -882,6 +1061,7 @@ def load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,G
 
     vord='disp'
     if G_from_file==True: #load from file
+        print('... ... read from miniSEED into stream objects')
         Eds=read(home+project_name+'/GFs/matrices/'+G_name+'.Eds.'+vord+'.mseed')
         Nds=read(home+project_name+'/GFs/matrices/'+G_name+'.Nds.'+vord+'.mseed')
         Zds=read(home+project_name+'/GFs/matrices/'+G_name+'.Zds.'+vord+'.mseed')
@@ -898,7 +1078,7 @@ def load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,G
         Nfaults=source.shape[0] #Number of subfaults
         kindex=0
         for ksta in range(Nsta):
-            print('Reading green functions for station #'+str(ksta+1)+' of '+str(Nsta))
+            print('... ... reading green functions for station #'+str(ksta+1)+' of '+str(Nsta))
             for kfault in range(Nfaults):
                 #Get subfault GF directory
                 nsub='sub'+str(int(source[kfault,0])).rjust(4,'0')
@@ -921,7 +1101,7 @@ def load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,G
                     Nds+=read(syn_path+staname[ksta]+'.'+nfault+'.DS.'+vord+'.n')
                     Zds+=read(syn_path+staname[ksta]+'.'+nfault+'.DS.'+vord+'.z')
                 kindex+=1
-        print('Writting synthetics to miniSEED, hang on this might take a minute or two.')
+        print('... done, writting synthetics to miniSEED, hang on this might take a minute or two.')
         Ess.write(home+project_name+'/GFs/matrices/'+G_name+'.Ess.'+vord+'.mseed',format='MSEED')
         Nss.write(home+project_name+'/GFs/matrices/'+G_name+'.Nss.'+vord+'.mseed',format='MSEED')
         Zss.write(home+project_name+'/GFs/matrices/'+G_name+'.Zss.'+vord+'.mseed',format='MSEED')
@@ -931,6 +1111,15 @@ def load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,G
     return Nss,Ess,Zss,Nds,Eds,Zds
 
 
+def list2stream(st_list):
+    
+    from obspy import Stream
+    
+    st=Stream()
+    for k in range(len(st_list)):
+        st += st_list[k]
+    return st
+    
 
 
 def load_fakequakes_tele_synthetics(home,project_name,fault_name,model_name,GF_list_teleseismic,G_from_file,G_name,decimation_factor):
@@ -1042,8 +1231,178 @@ def load_fakequakes_tele_synthetics(home,project_name,fault_name,model_name,GF_l
 
 
 
-def get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_name,time_epi,GF_list,epicenter,NFFT,
-                source_time_function,stf_falloff_rate,zeta=0.2,forward=False):
+def get_fakequakes_G_and_m(Gimpulse,home,project_name,rupture_name,time_epi,GF_list,epicenter,NFFT,
+                source_time_function,stf_falloff_rate,dt=1.0,zeta=0.2,forward=False,reconvolution=False,
+                old_stf='prem_i_2s',ncpus=1):
+    '''
+    Assemble Green functions matrix. If requested will parse all available synthetics on file and build the matrix.
+    Otherwise, if it exists, it will be loaded from file 
+    
+    IN:
+        home: Home directory location
+        project_name: Name of the problem
+        fault_name: Name of fault description file
+        model_name: Name of velocity structure file
+        GF_list: Name of GF control file
+        G_from_file: if =0 build G from synthetics on file. If =1 then load from file
+        G_name: If building G fromsynthetics then this is the name G will be saved with
+            in binary .npy format. If loading from file this is the name to be looked for. 
+            It is not necessary to supply the .npy extension
+        epicenter: Epicenter coordinates
+        rupture_speed: Fastest rupture speed allowed in the problem
+        num_windows: Number of temporal rupture windows allowed
+        decimate: Constant decimationf actor applied to GFs, set =0 for no decimation
+        
+    OUT:
+        G: Fully assembled GF matrix
+    '''
+    
+    from numpy import genfromtxt,convolve,where,zeros,arange,unique,r_,sort,ones
+    from numpy import expand_dims,squeeze,roll,float64,array
+    import dask.array as da
+
+    if forward==True:
+        source=genfromtxt(home+project_name+'/forward_models/'+rupture_name)
+    else:
+        source=genfromtxt(home+project_name+'/output/ruptures/'+rupture_name)
+    rise_times=source[:,7]
+    rupture_onset=source[:,12]
+    
+    # Gaussian STF hard coded values    WARNING!!!!
+    old_rise_time = 2.1 #This is the prem_i_2s hard coded value
+    time_offset_gauss=100 #Hard coded for now. Long enough for any conceivable rise time
+    #####################
+    
+    
+    
+    #How many unique faults?
+    Nfaults=len(unique(source[:,0]))
+    
+    #How many subfaults are non-zero?
+    i_non_zero_original=where(rise_times>0)[0]
+    N_non_zero=len(i_non_zero_original)
+    rise_times = rise_times[i_non_zero_original]
+    rupture_onset = rupture_onset[i_non_zero_original]
+    
+    #Convert rupture onsets to itneger number of samples
+    rupture_onset = (rupture_onset/dt).astype('int')
+    
+    #Now convert to indices according to how G matrix is ordered
+    i_non_zero = sort(r_[i_non_zero_original*2,i_non_zero_original*2+1])
+    
+    #Stations
+    station_file=home+project_name+'/data/station_info/'+GF_list
+    staname=genfromtxt(station_file,dtype="U",usecols=0)
+    Nsta=len(staname)
+    
+    #Extract only impulses from non-zero fautls and put into
+    #Dask array Convert impulses matrix to dask array
+    Gimpulse = da.from_array(Gimpulse[:,i_non_zero],chunks = (NFFT*Nsta*3,2))
+    
+    #Make array of slip rate functions, it will be one matrix for a gingle sta 
+    #and all subfaults simualtenously
+    slip_rates = ones((NFFT,N_non_zero))
+    
+    total_time = (NFFT-1) * dt
+    for ksub in range(N_non_zero):
+        tau_r = rise_times[ksub]
+        
+        if reconvolution == False:
+            sr = build_source_time_function(tau_r,dt,total_time,stf_type=source_time_function,
+                            zeta=zeta,dreger_falloff_rate=stf_falloff_rate)
+        else:
+            sr = build_source_time_function(tau_r,dt,total_time,stf_type='gauss_prem_i_2s',
+                            time_offset_gauss=time_offset_gauss,scale=True,scale_value=1.0,quiet=True)
+               
+        t_stf,slip_rates[:,ksub] = expand_dims(sr,1)
+        
+    #COnvert slip rates and onsets to dask array
+    rupture_onset = da.from_array(rupture_onset,chunks = (1,))
+    slip_rates = da.from_array(slip_rates,chunks = (NFFT,1))
+    
+    
+    #Are we reconvovling?
+    if reconvolution == True:
+        #Need old STF
+        t_stf,old_stf=build_source_time_function(old_rise_time,dt,total_time,
+                stf_type='gauss_prem_i_2s',time_offset_gauss=time_offset_gauss,
+                scale=True,scale_value=1.0)
+    else:
+        old_stf = None
+
+    
+    
+    #Define block convolution and trim function to be mapped with DASK
+    def block_convolution_and_shift(gf_block,slip_rate_block,onset_block,NFFT,
+                    old_slip_rate_function = None,reconvolution = False):
+        '''
+        gf_block is the block from the impulse response GFs
+        slip_rate_block  is the block from the slip rate functions
+        '''
+        
+        start_row = 0 #These two track which bit of the array to extract
+        end_row = NFFT
+        
+        
+        #Define slip rate functions
+        slip_rate_function = squeeze(slip_rate_block) #New STF
+        if reconvolution == True:
+             old_slip_rate_function = squeeze(old_slip_rate_function)
+        
+        Gout = ones(gf_block.shape)
+        
+        for ksta in range(Nsta):
+            for kcomponent in range(3): # Loops over N,E,Z
+                for krake in range(2): #loops over ss and ds
+            
+                    gf = gf_block[start_row:end_row,krake]
+                    
+                    #remove extraneous dimensions
+                    gf = squeeze(gf)
+                   
+                    
+                    #Roll the gf forward by rupture_onset samples
+                    gf = roll(gf,onset_block)
+                    #Zero out the first rolled samples
+                    gf[0:onset_block[0]] = 0 #The sonet block is really jsut a single number
+                    
+
+                    
+                    #Convovle impulse resp and slip rate function
+                    if reconvolution == False :  #COnvovle new STF with impulse
+                        gf = convolve(gf,slip_rate_function)[0:NFFT]
+                    else:  #Reconvolution, need both new STF and old STF
+                        gf = gauss_reconvolution(gf,slip_rate_function,old_slip_rate_function)
+                        
+        
+                    #save for output
+                    Gout[start_row:end_row,krake] = gf
+                
+                #Update counters
+                start_row += NFFT
+                end_row += NFFT   
+        
+        return Gout
+    
+    G = da.map_blocks(block_convolution_and_shift, Gimpulse, slip_rates,
+            rupture_onset,NFFT,old_stf,reconvolution,chunks=(NFFT*Nsta*3,2),
+            dtype=float64).persist(num_workers=ncpus)
+
+    
+    #Get slip model vector
+    m=zeros((N_non_zero*2,1))
+    iss=arange(0,len(m),2)
+    ids=arange(1,len(m),2)
+    m[iss,0]=source[i_non_zero_original,8]
+    m[ids,0]=source[i_non_zero_original,9]
+
+    return m,array(G)
+
+
+
+
+def get_fakequakes_G_and_m_old_pre_DASK(Gimpulse,home,project_name,rupture_name,time_epi,GF_list,epicenter,NFFT,
+                source_time_function,stf_falloff_rate,zeta=0.2,forward=False,reconvolution=False,old_stf='prem_i_2s'):
     '''
     Assemble Green functions matrix. If requested will parse all available synthetics on file and build the matrix.
     Otherwise, if it exists, it will be loaded from file 
@@ -1068,6 +1427,8 @@ def get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_nam
     '''
     
     from numpy import genfromtxt,convolve,where,zeros,arange,unique
+    import gc
+    import dask.array as da
 
 
     if forward==True:
@@ -1096,7 +1457,7 @@ def get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_nam
     matrix_pos=0 #tracks where in matrix synths are placed
     read_start=0  #Which trace to start reading from
     for ksta in range(Nsta):
-        print('... working on station '+str(ksta)+' of '+str(Nsta))
+        print('... ... working on station '+str(ksta+1)+' of '+str(Nsta))
         
         for ksource in range(len(i_non_zero)):
 
@@ -1120,15 +1481,41 @@ def get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_nam
             rise=round(rise/dt)*nss.stats.delta
             if rise<(2.*dt): #Otherwise get nan's in STF
                 rise=2.*dt
-            total_time=NFFT*dt
-            t_stf,stf=build_source_time_function(rise,dt,total_time,stf_type=source_time_function,zeta=zeta,dreger_falloff_rate=stf_falloff_rate)
+            
+            total_time=NFFT*dt-dt
+            
+            if reconvolution==False: #Do a straight up convolution with new slip rate function
+                
+                #Build the new slip rate function
+                t_stf,stf=build_source_time_function(rise,dt,total_time,stf_type=source_time_function,zeta=zeta,dreger_falloff_rate=stf_falloff_rate)
 
-            nss.data=convolve(nss.data,stf)[0:NFFT]
-            ess.data=convolve(ess.data,stf)[0:NFFT]
-            zss.data=convolve(zss.data,stf)[0:NFFT]
-            nds.data=convolve(nds.data,stf)[0:NFFT]
-            eds.data=convolve(eds.data,stf)[0:NFFT]
-            zds.data=convolve(zds.data,stf)[0:NFFT]
+                nss.data=convolve(nss.data,stf)[0:NFFT]
+                ess.data=convolve(ess.data,stf)[0:NFFT]
+                zss.data=convolve(zss.data,stf)[0:NFFT]
+                nds.data=convolve(nds.data,stf)[0:NFFT]
+                eds.data=convolve(eds.data,stf)[0:NFFT]
+                zds.data=convolve(zds.data,stf)[0:NFFT]
+            else: #reconvovleby using old stf
+            
+
+                
+                #Need old STF
+                old_rise_time = 2.1 #This is the prem_i_2s hard coded value
+                time_offset_gauss=100 #Hard coded for now. Long enough for any conceivable rise time
+                t_stf,old_stf=build_source_time_function(old_rise_time,dt,total_time,stf_type='gauss_prem_i_2s',time_offset_gauss=time_offset_gauss,scale=True,scale_value=1.0)
+                
+                #Now the new STF
+                t_stf,new_stf=build_source_time_function(rise,dt,total_time,stf_type='gauss_prem_i_2s',time_offset_gauss=time_offset_gauss,scale=True,scale_value=1.0,quiet=True)
+                
+                #Reconvolutions
+                nss.data=gauss_reconvolution(nss.data,new_stf,old_stf)
+                ess.data=gauss_reconvolution(ess.data,new_stf,old_stf)
+                zss.data=gauss_reconvolution(zss.data,new_stf,old_stf)
+                nds.data=gauss_reconvolution(nds.data,new_stf,old_stf)
+                eds.data=gauss_reconvolution(eds.data,new_stf,old_stf)
+                zds.data=gauss_reconvolution(zds.data,new_stf,old_stf)
+                
+                
             #Place in matrix
             G[matrix_pos:matrix_pos+NFFT,2*ksource]=nss.data
             G[matrix_pos:matrix_pos+NFFT,2*ksource+1]=nds.data
@@ -1136,6 +1523,10 @@ def get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_nam
             G[matrix_pos+NFFT:matrix_pos+2*NFFT,2*ksource+1]=eds.data
             G[matrix_pos+2*NFFT:matrix_pos+3*NFFT,2*ksource]=zss.data
             G[matrix_pos+2*NFFT:matrix_pos+3*NFFT,2*ksource+1]=zds.data
+            
+            #Having some sort of memory issue delete streams and garbage collect to avoid it
+            del nss,ess,zss,nds,eds,zds
+            gc.collect()
             
         matrix_pos+=3*NFFT
         read_start+=Nfaults
@@ -1147,6 +1538,35 @@ def get_fakequakes_G_and_m(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_nam
     m[ids,0]=source[i_non_zero,9]
 
     return m,G
+
+
+
+
+
+
+
+
+def gauss_reconvolution(data,new_stf,old_stf):
+    
+    '''
+    Used if original slip rate function was NOT  an impulse, then you need to "reconvolve"
+    as per the SRL paper on Syngine/Instaseis (kirscher et al., 2017?). THis currently
+    will only work for teleseismics and the slip rate functions used by indtaseis
+    which are all Gaussians
+    '''
+    
+    from numpy import fft,real
+    
+    #fft STFs and data
+    Data=fft.fft(data) 
+    STF_new=fft.fft(new_stf)
+    STF_old=fft.fft(old_stf)
+    
+    #New seismogram
+    Data_new=(Data*STF_new)/STF_old
+    data_new=real(fft.ifft(Data_new))
+    
+    return data_new
 
 
 def get_fakequakes_G_and_m_dynGF(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,rupture_name,time_epi,STA,GF_list,epicenter,NFFT,
@@ -1205,7 +1625,7 @@ def get_fakequakes_G_and_m_dynGF(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,ruptu
     matrix_pos=0 #tracks where in matrix synths are placed
     #read_start=0  #Which trace to start reading from
     for ksta in range(Nsta):
-        print('... working on station '+str(ksta)+' of '+str(Nsta))
+        print('... ... working on station '+str(ksta)+' of '+str(Nsta))
         read_start=STA[staname[ksta]]*Nfaults #Which trace to start reading from. Depending on the original GF_list order
         for ksource in range(len(i_non_zero)):
 
@@ -2242,35 +2662,54 @@ def tshift_trace(nss,ess,zss,nds,eds,zds,tshift,time_epi,npts):
     return nss,ess,zss,nds,eds,zds
     
     
+
+
+def trim_to_hypo_time_and_pad(tr,hypo_time,npts):
+    """
+    
+    This function si tobe used for making sure syntehtics start at hypo time 
+    and have the correct lengths. Will zero pad at begining or pad with last
+    value at end of trace depedning on the situation
+
+    Parameters
+    ----------
+    tr : obspy trace objet
+        The inputt ace to be trimmed
+    hypo_time : UTCDateTime object
+        Hypocentral time for the rupture
+    npts : int
+        Total number of points expected in output trace, usually shoudl be 
+        same as NFFT used in GFs/synthetics calculation
+
+    Returns
+    -------
+    tr : obspy trace object
+        Trimmed and paddedtrace
+
+    """
     
     
+    from numpy import zeros,r_,ones
     
-    ##Trim
-    #dt=tr.stats.delta
-    ##Round down start time
-    #dt=dt*1e6 #Converts to microseconds
-    #t1=tr.stats.starttime
-    #t1.microsecond=int((t1.microsecond/int(dt))*dt)
-    #tr.stats.starttime=t1
+    samples_to_pad = abs(int(round((tr.stats.starttime - hypo_time)/tr.stats.delta)))
+    
+    if samples_to_pad > npts:  #trace is waaaay too far into the future
+        tr.data = zeros(npts)
+        
+    else:
+        if tr.stats.starttime > hypo_time:
+            tr.data = r_[zeros(samples_to_pad),tr.data[0:npts-samples_to_pad]]
+    
+        else:
+            tr.data = r_[tr.data[samples_to_pad:],tr.data[-1]*ones(samples_to_pad)]
+        
+    #And update starttime
+    tr.stats.starttime = hypo_time
+    
+    return tr    
     
     
-    ##Cut first to time_epi
-    #tr.trim(starttime=time_epi,pad=True,fill_value=0)
-    ##Cut to npts*dt
-    #coseismic_offset=tr[-10:].mean()
-    #tr.trim(endtime=time_epi+npts*dt,pad=True,fill_value=coseismic_offset)
-    ##Round down start time
-    #dt=dt*1e6 #Converts to microseconds
-    #t1=tr.stats.starttime
-    #t1.microsecond=int((t1.microsecond/int(dt))*dt)
-    #tr.stats.starttime=t1
-    ##Check the length
-    #if tr.stats.npts>npts:
-    #    extra_samples=tr.stats.npts-npts
-    #    tr.data=tr.data[0:-extra_samples]
-    #elif tr.stats.npts<npts:
-    #    print 'ERROR in forward.tshift_trace, synthetic has fewer samples than required'
-    #return tr                                                               
+                                                            
         
 def round_time(t1,delta):
     '''
@@ -3416,11 +3855,12 @@ def convolution_matrix(h):
     return Hfinal
     
     
-def build_source_time_function(rise_time,dt,total_time,stf_type='triangle',zeta=0.2,dreger_falloff_rate=4,scale=True,time_offset=0):
+def build_source_time_function(rise_time,dt,total_time,stf_type='triangle',zeta=0.2,dreger_falloff_rate=4,
+                               scale=True,scale_value=1.0,time_offset=0,time_offset_gauss=0,quiet=False):
     '''
     Compute source time function for a given rise time
     '''
-    from numpy import zeros,arange,where,pi,cos,sin,isnan,exp
+    from numpy import zeros,arange,where,pi,cos,sin,isnan,exp,roll
     from scipy.integrate import trapz
     
     rise_time=float(rise_time)
@@ -3455,13 +3895,32 @@ def build_source_time_function(rise_time,dt,total_time,stf_type='triangle',zeta=
     elif stf_type=='dreger':
         tau=rise_time/dreger_falloff_rate
         Mdot=(t**zeta)*exp(-t/tau)
+    elif stf_type == 'gauss_prem_i_2s':  #The decay parameter for this is fixed by instaseis/syngine
+        decay=3.5 #Hard coded in syngine, good number for rise time to actually correspond to the function width
+        center_time = 3.5858 #Hard coded in syngine
+        min_rise_time = 2.1 #Rise times shorter than this are not allowed
+        if rise_time < min_rise_time:
+            if quiet==False:
+               print('... ... ...  WARNING: rise time requested is below minimum allowed of %.1fs, defaulting to minimum' % min_rise_time)
+            rise_time = min_rise_time
+    
+        Mdot = decay/(rise_time*pi**0.5)*exp(-((decay * (t - time_offset_gauss))/rise_time)**2)
+        #Here comes the tricky bit. Need to roll the slip rate function FORWARD
+        # By an ammount equal to half the new rise time minus half original rise time (2.1/2)
+        t_roll = rise_time/2 - min_rise_time/2
+        t_roll_samples = int(t_roll/dt)
+        Mdot = roll(Mdot,t_roll_samples)
     else:
         print('ERROR: unrecognized STF type '+stf_type)
         return
     #Area of STF must be equal to dt
     if scale==True:
+        if scale_value is None: #Re-scale to dt (for traditional convolution)
+            target=dt # this is the target scale value
+        else:
+            target=scale_value
         area=trapz(Mdot,t)
-        Mdot=Mdot*(dt/area)
+        Mdot=Mdot*(scale_value/area)
     #Check for errors
     if isnan(Mdot[0])==True:
         print('ERROR: woops, STF has nan values!')
