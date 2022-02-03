@@ -46,6 +46,7 @@ def waveforms(home,project_name,rupture_name,station_file,model_name,run_name,in
     #Load stations
     stagps_file=home+project_name+'/data/station_info/'+station_file
     staname=genfromtxt(station_file,dtype="U",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     #What am I processing v or d ?
     if integrate==1:
         vord='disp'
@@ -191,6 +192,7 @@ def waveforms_matrix(home,project_name,fault_name,rupture_name,station_file,GF_l
     #Load stations
     station_file=home+project_name+'/data/station_info/'+station_file
     staname=genfromtxt(station_file,dtype="U",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     #Now load rupture model
     mss=genfromtxt(home+project_name+'/forward_models/'+rupture_name,usecols=8)
     mds=genfromtxt(home+project_name+'/forward_models/'+rupture_name,usecols=9)
@@ -316,6 +318,7 @@ def waveforms_fakequakes(home,project_name,fault_name,rupture_list,GF_list,
     # Need to know how many sites and delta t
     station_file=home+project_name+'/data/station_info/'+GF_list
     staname=genfromtxt(station_file,dtype="U",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     Nsta=len(staname)
     dt = Nss[0].stats.delta
     
@@ -1056,7 +1059,7 @@ def load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,G
     ''''
     Load the miniseed files with all the synthetics
     '''
-    from numpy import genfromtxt,loadtxt
+    from numpy import genfromtxt,loadtxt,array
     from obspy import read    
 
     vord='disp'
@@ -1072,6 +1075,7 @@ def load_fakequakes_synthetics(home,project_name,fault_name,model_name,GF_list,G
         #Load station info
         station_file=home+project_name+'/data/station_info/'+GF_list
         staname=genfromtxt(station_file,dtype="U",usecols=0)
+        staname = array(staname, ndmin=1) # in case only one station
         Nsta=len(staname)
         #Load fault model
         source=loadtxt(home+project_name+'/data/model_info/'+fault_name,ndmin=2)
@@ -1293,6 +1297,7 @@ def get_fakequakes_G_and_m(Gimpulse,home,project_name,rupture_name,time_epi,GF_l
     #Stations
     station_file=home+project_name+'/data/station_info/'+GF_list
     staname=genfromtxt(station_file,dtype="U",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     Nsta=len(staname)
     
     #Extract only impulses from non-zero fautls and put into
@@ -1426,7 +1431,7 @@ def get_fakequakes_G_and_m_old_pre_DASK(Gimpulse,home,project_name,rupture_name,
         G: Fully assembled GF matrix
     '''
     
-    from numpy import genfromtxt,convolve,where,zeros,arange,unique
+    from numpy import genfromtxt,convolve,where,zeros,arange,unique,array
     import gc
     import dask.array as da
 
@@ -1448,6 +1453,7 @@ def get_fakequakes_G_and_m_old_pre_DASK(Gimpulse,home,project_name,rupture_name,
     #Stations
     station_file=home+project_name+'/data/station_info/'+GF_list
     staname=genfromtxt(station_file,dtype="U",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     Nsta=len(staname)
     
     #Initalize G matrix
@@ -1615,6 +1621,7 @@ def get_fakequakes_G_and_m_dynGF(Nss,Ess,Zss,Nds,Eds,Zds,home,project_name,ruptu
     #Stations
     station_file=home+project_name+'/data/station_info/'+GF_list
     staname=genfromtxt(station_file,dtype="S6",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     staname=[n_name.decode() for n_name in staname]
     Nsta=len(staname)
 
@@ -1684,7 +1691,7 @@ def write_fakequakes_waveforms(home,project_name,rupture_name,waveforms,GF_list,
     '''
     
     from os import path,makedirs
-    from numpy import genfromtxt,squeeze,sqrt
+    from numpy import genfromtxt,squeeze,sqrt,array
     from obspy import Stream,Trace
     from pyproj import Geod
     
@@ -1702,8 +1709,11 @@ def write_fakequakes_waveforms(home,project_name,rupture_name,waveforms,GF_list,
     
     # Get station list and coords
     sta=genfromtxt(home+project_name+'/data/station_info/'+GF_list,usecols=0,dtype='U') 
+    sta = array(sta, ndmin=1) # in case only one station
     lon=genfromtxt(home+project_name+'/data/station_info/'+GF_list,usecols=1)  
+    lon = array(lon, ndmin=1) # in case only one station
     lat=genfromtxt(home+project_name+'/data/station_info/'+GF_list,usecols=2) 
+    lat = array(lat, ndmin=1) # in case only one station
     # Get rupture information to store in waveform SAC files
     epicenter,time_epi,Mw=read_fakequakes_hypo_time(home,project_name,rupture_name,get_Mw=True)
     
@@ -1783,6 +1793,7 @@ def coseismics(home,project_name,rupture_name,station_file,hot_start=None):
     #Load stations
     station_file=home+project_name+'/data/station_info/'+station_file
     staname=genfromtxt(station_file,dtype="U",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     #Get unique sources
     source_id=unique(source[:,0])
     #Loop over stations
@@ -1878,6 +1889,7 @@ def coseismics_matrix(home,project_name,rupture_name,station_file,G_from_file,
     #Load stations
     station_file=home+project_name+'/data/station_info/'+station_file
     staname=genfromtxt(station_file,dtype="U",usecols=0)
+    staname = array(staname, ndmin=1) # in case only one station
     sta_lonlat=genfromtxt(station_file,usecols=[1,2])
     
     #Get unique sources
