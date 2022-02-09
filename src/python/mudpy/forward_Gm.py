@@ -45,6 +45,7 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
     from numpy import genfromtxt,array
     import datetime
     import time
+    from multiprocessing import current_process
     
     print('Solving for kinematic problem(s)')
     #Time for log file
@@ -52,13 +53,19 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
     now=now.strftime('%b-%d-%H%M')
     
     #load source names
-    if rupture_list==None:
-        #all_sources=array([home+project_name+'/forward_models/'+rupture_name])   
-        all_sources=array([rupture_name])  
-    else:
+    if rupture_list is None:
+        print('*** Error, this version requires rupture_list')
+    elif type(rupture_list) == str:
+        # load from file:
         all_sources=genfromtxt(home+project_name+'/data/'+rupture_list,dtype='U')
         all_sources = array(all_sources, ndmin=1)  # in case only 1 entry
+    else:
+        # assume it's a list of rupture names
+        all_sources = rupture_list
     
+    print('+++ Process %i creating waveforms for all_sources = %s' \
+            % (current_process().pid, repr(all_sources)))
+
     #Load all synthetics
     print('... loading all synthetics into memory')
     Nss,Ess,Zss,Nds,Eds,Zds=load_fakequakes_synthetics(home,project_name,
@@ -72,9 +79,6 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
     staname = array(staname, ndmin=1) # in case only one station
     Nsta=len(staname)
     
-    #Now get the impulse response G for all sites and all subfaults
-    #Gimpulse_all = Nss,Ess,Zss,Nds,Eds,Zds=mseed2matrix(Nss,,Ess,Zss,Nds,Eds,Zds)
-    
     
     #Now loop over rupture models
     for ksource in range(hot_start,len(all_sources)):
@@ -82,12 +86,10 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
         rupture_name=all_sources[ksource]
         print('... ' + rupture_name)
         
-        if rupture_list!=None:
-            #Get epicentral time
-            epicenter,time_epi=read_fakequakes_hypo_time(home,project_name,rupture_name)
-            forward=False
-        else:
-            forward=True #This controls where we look for the rupture file
+        # In this version forward must be false...
+        #Get epicentral time
+        epicenter,time_epi=read_fakequakes_hypo_time(home,project_name,rupture_name)
+        forward=False
         
         # Compute G*m and return as waveforms:
 
@@ -102,69 +104,10 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
         print('... ... slip rate convolutions completed in {:.1f}s'.format(t2-t1))
         
         #Write output
-        write_fakequakes_waveforms(home,project_name,rupture_name,waveforms,GF_list,NFFT,time_epi,dt)
+        write_fakequakes_waveforms(home,project_name,rupture_name,
+                                   waveforms,GF_list,NFFT,time_epi,dt)
         
     
-def stream2matrix(Nss,Ess,Zss,Nds,Eds,Zds,Nsta):
-    '''
-    
-    Converts stream objects to a properly formatted G matrix
-
-    Parameters
-    ----------
-    Nss,Ess ... : Stream objects with synthetics for each component of motion and
-                    for the ss and ds rake angles
-
-
-    Nsta : int, number of stations being processed
-
-
-    Returns
-    -------
-    G = [ Nss_sta1_sf1 Nds sta1_ sf1     Nss_sta1_sf2 Nds sta1_ sf2 ...
-          Ess_sta1_sf1 Eds sta1_ sf1     Nss_sta1_sf3 Nds sta1_ sf3 ...
-          Zss_sta1_sf1 Zds sta1_ sf1     Nss_sta1_sf3 Nds sta1_ sf3 ...
-          Nss_sta2_sf1 Nds sta2_ sf1
-          Ess_sta2_sf1 Eds sta2_ sf1
-          Zss_sta2_sf1 Zds sta2_ sf1
-          ...
-
-    '''    
-    
-    from numpy import ones
-    
-    #How many time points ins ytnethics
-    Npts = Nss[0].stats.npts
-    
-    #How many sources?
-    Nsources = int(len(Nss) / Nsta)
-    
-    #Initalize G matrix
-    G = ones((Npts*Nsta*3,2*Nsources))
-    
-    k=0
-    row_start = 0
-    row_end = Npts
-    for ksta in range(Nsta):
-        for ksub in range(Nsources):
-            
-            G[row_start:row_end,2*ksub] = Nss[k].data
-            G[row_start:row_end,2*ksub+1] = Nds[k].data
-            
-            G[row_start+Npts:row_end+Npts,2*ksub] = Ess[k].data
-            G[row_start+Npts:row_end+Npts,2*ksub+1] = Eds[k].data
-    
-            G[row_start+2*Npts:row_end+2*Npts,2*ksub] = Zss[k].data
-            G[row_start+2*Npts:row_end+2*Npts,2*ksub+1] = Zds[k].data
-            
-            k += 1
-    
-        row_start += 3*Npts
-        row_end += 3*Npts
-    
-    return G
-        
-
 
 
 
@@ -316,3 +259,53 @@ def get_fakequakes_G_times_m(Nss,Ess,Zss,Nds,Eds,Zds,home,
     return Gm
 
 
+
+def waveforms_fakequakes_Gm_multip(home,project_name,fault_name,
+                rupture_list,GF_list,
+                model_name,run_name,dt,NFFT,
+                source_time_function='dreger',zeta=0.2,
+                stf_falloff_rate=4.0,rupture_name=None,
+                epicenter=None,time_epi=None, hot_start=0, ncpus=1):
+
+    """
+    Use multiprocessing.pool to do ruptures in parallel.
+    """
+
+    from multiprocessing import Pool
+
+
+    if rupture_list is None:
+        print('*** Error, this version requires rupture_list')
+    elif type(rupture_list) == str:
+        # load from file:
+        all_sources=genfromtxt(home+project_name+'/data/'+rupture_list,dtype='U')
+        all_sources = array(all_sources, ndmin=1)  # in case only 1 entry
+    else:
+        # assume it's a list of rupture names
+        all_sources = rupture_list
+
+    # Make a list of arguments needed for waveforms_fakequakes_Gm.
+    # Only the argument rupture_list changes as we loop through all the 
+    # subfaults. (Which will be done in parallel with multiprocessing.Pool.)
+
+    all_args = []
+    for source in all_sources:
+        single_source_rupture_list = [source]
+        args = (home,project_name,fault_name,
+                single_source_rupture_list,GF_list,
+                model_name,run_name,dt,NFFT,
+                source_time_function,zeta,
+                stf_falloff_rate,rupture_name,
+                epicenter,time_epi, hot_start)
+        all_args.append(args)
+        
+    # now all_args is a list and each element of the list is a tuple with all
+    # the arguments needed for waveforms_fakequakes_Gm.  
+    # Farm these out to the requested number of threads, ncpus:
+    
+    print('Distributing %i ruptures among %i threads' \
+            % (len(all_args),ncpus))
+
+    with Pool(processes=ncpus) as pool:
+        pool.starmap(waveforms_fakequakes_Gm, all_args)
+    
