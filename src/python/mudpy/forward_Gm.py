@@ -3,8 +3,10 @@ D. Melgar 02/2014
 
 Forward modeling routines
 
-Modified version to accumulate G*m
-@rjleveque 2/2022
+@rjleveque 2/2022:
+Modified version of some routines for making GNSS waveforms from fakequakes
+ruptures,  to accumulate G*m rather than forming matrix G,
+and to allow multiprocessing.
 
 '''
 
@@ -35,9 +37,8 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
         home: Home directory
         project_name: Name of the problem
         rupture_name: Name of rupture description file
-        station_file: File with coordinates of stations
-        model_Name: Name of Earth structure model file
-        integrate: =0 if you want output to be velocity, =1 if you want output to de displacement
+        
+        Needs updating
        
     OUT:
         Nothing
@@ -60,7 +61,7 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
         all_sources=genfromtxt(home+project_name+'/data/'+rupture_list,dtype='U')
         all_sources = array(all_sources, ndmin=1)  # in case only 1 entry
     else:
-        # assume it's a list of rupture names
+        # assume it's a list of rupture names (needed for multiprocessing)
         all_sources = rupture_list
     
     print('+++ Process %i creating waveforms for all_sources = %s' \
@@ -107,9 +108,8 @@ def waveforms_fakequakes_Gm(home,project_name,fault_name,rupture_list,GF_list,
         write_fakequakes_waveforms(home,project_name,rupture_name,
                                    waveforms,GF_list,NFFT,time_epi,dt)
         
+        
     
-
-
 
 
 def get_fakequakes_G_times_m(Nss,Ess,Zss,Nds,Eds,Zds,home,
@@ -213,9 +213,7 @@ def get_fakequakes_G_times_m(Nss,Ess,Zss,Nds,Eds,Zds,home,
                 eds.data=convolve(eds.data,stf)[0:NFFT]
                 zds.data=convolve(zds.data,stf)[0:NFFT]
             else: #reconvovle by using old stf
-            
-
-                
+    
                 #Need old STF
                 old_rise_time = 2.1 #This is the prem_i_2s hard coded value
                 time_offset_gauss=100 #Hard coded for now. Long enough for any conceivable rise time
@@ -268,7 +266,8 @@ def waveforms_fakequakes_Gm_multip(home,project_name,fault_name,
                 epicenter=None,time_epi=None, hot_start=0, ncpus=1):
 
     """
-    Use multiprocessing.pool to do ruptures in parallel.
+    Wrapper for waveforms_fakequakes_Gm that uses
+    multiprocessing.Pool to do ruptures in parallel.
     """
 
     from multiprocessing import Pool
@@ -286,7 +285,7 @@ def waveforms_fakequakes_Gm_multip(home,project_name,fault_name,
 
     # Make a list of arguments needed for waveforms_fakequakes_Gm.
     # Only the argument rupture_list changes as we loop through all the 
-    # subfaults. (Which will be done in parallel with multiprocessing.Pool.)
+    # ruptures. (Which will be done in parallel with multiprocessing.Pool.)
 
     all_args = []
     for source in all_sources:
@@ -301,11 +300,13 @@ def waveforms_fakequakes_Gm_multip(home,project_name,fault_name,
         
     # now all_args is a list and each element of the list is a tuple with all
     # the arguments needed for waveforms_fakequakes_Gm.  
-    # Farm these out to the requested number of threads, ncpus:
+    # Farm these out to the requested number of processes, specified by ncpus:
     
-    print('Distributing %i ruptures among %i threads' \
-            % (len(all_args),ncpus))
+    ncpus_to_use = min(ncpus, len(all_sources))  # reduce if fewer ruptures
+    
+    print('Distributing %i ruptures among %i processes' \
+            % (len(all_sources),ncpus_to_use))
 
-    with Pool(processes=ncpus) as pool:
+    with Pool(processes=ncpus_to_use) as pool:
         pool.starmap(waveforms_fakequakes_Gm, all_args)
     
