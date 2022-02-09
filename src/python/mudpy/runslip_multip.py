@@ -246,8 +246,8 @@ def make_green_one_subfault(ksource,home,project_name,station_file,
                     +repr(pmax)+'/'+repr(kmax)+diststr)
         p=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                            env=mud_env)
-        print('Popen Process %i will run fk on subfault %i' \
-                % (p.pid,source[ksource,0]))
+        #print('Popen Process %i will run fk on subfault %i' \
+        #        % (p.pid,source[ksource,0]))
         p.communicate() 
         # Move files up one level and delete folder created by fk
         files_list=glob(subfault_folder+'/'+model_name+'_'+depth+'/*.grn*')
@@ -272,8 +272,8 @@ def make_green_one_subfault(ksource,home,project_name,station_file,
                 print('Warning: I just had a mini-seizure and made an empty GF file on first try, re-running')
         #If file is empty run again   
          
-    print('Popen Process %i done running fk on subfault %i' \
-            % (p.pid,source[ksource,0]))
+    #print('Popen Process %i done running fk on subfault %i' \
+    #        % (p.pid,source[ksource,0]))
             
     ppool = current_process()
     print('Pool  Process %i done working on subfault %i' \
