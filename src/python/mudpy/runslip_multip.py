@@ -251,6 +251,8 @@ def make_green_one_subfault(ksource,home,project_name,station_file,
         p.communicate() 
         # Move files up one level and delete folder created by fk
         files_list=glob(subfault_folder+'/'+model_name+'_'+depth+'/*.grn*')
+        #files_list=glob(subfault_folder+'/'+model_name+'_'+depth+'/*.grn.0')
+        #files_list+=glob(subfault_folder+'/'+model_name+'_'+depth+'/*.grn.1')
         for f in files_list:
             newf=subfault_folder+'/'+f.split('/')[-1]
             copy(f,newf)
@@ -693,6 +695,13 @@ def make_synthetics_one_subfault(one_source,home,project_name,station_file,
             p.communicate()
             # print('Popen Process %i will run syn DS on subfault %i' \
             #                 % (p.pid,source[0]))
+
+            # The grn files are no longer needed:
+            grn_files = glob(diststr+'.grn.*')
+            print('+++ Removing: ',grn_files)
+            for f in grn_files:
+                silentremove(f)
+
             #Result is in RTZ system (+Z is down) 
             #rotate to NEZ with +Z up and scale to m or m/s
             if integrate==1: #'tis displacememnt
