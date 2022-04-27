@@ -1124,6 +1124,7 @@ def run_parallel_synthetics_mt3d(home,project_name,station_file,model_name,force
 #If main entry point
 if __name__ == '__main__':
     import sys
+    sys.path.append('/mmfs1/sw/intel/oneAPI/2021.1.0.2659/intelpython/python3.7/lib/python3.7/site-packages')
     from mpi4py import MPI
     from obspy import UTCDateTime
 
@@ -1221,4 +1222,4 @@ if __name__ == '__main__':
         run_parallel_synthetics_mt3d(home,project_name,station_file,model_name,forceMT,mt,insar,rank,size)
     else:
         print('ERROR: You''re not allowed to run '+sys.argv[1]+' from the shell or it does not exist')
-        
+

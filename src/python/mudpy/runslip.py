@@ -11,6 +11,9 @@ fkdir = '%s/src/fk/' % MUD
 mud_env = os.environ.copy()
 mud_env['PATH'] = mud_env['PATH'] + ':' + fkdir
 mud_env['PYTHONPATH'] = mud_env['PYTHONPATH'] + ':' + '%s/src/python' % MUD
+mud_env['PYTHONPATH'] = mud_env['PYTHONPATH'] + ':' + \
+  '/mmfs1/sw/intel/oneAPI/2021.1.0.2659/intelpython/python3.7/lib/python3.7/site-packages'
+
 print('+++ Will call Popen with PATH = ',mud_env['PATH'])
 print('+++ and PYTHONPATH = ',mud_env['PYTHONPATH'])
 
