@@ -133,8 +133,10 @@ def get_fakequakes_G_times_m(Nss,Ess,Zss,Nds,Eds,Zds,home,
         Gm: Product of GF matrix and slip vector m.
     '''
     
-    from numpy import genfromtxt,convolve,where,zeros,arange,unique,array
+    from numpy import genfromtxt,where,zeros,arange,unique,array
     import gc
+
+    from scipy.signal import convolve
 
 
     if forward==True:
