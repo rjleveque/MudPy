@@ -112,7 +112,7 @@ def generate_ruptures(home,project_name,run_name,fault_name,slab_name,mesh_name,
             rname = realization.rname
             f.write('%s.rupt\n' % rname)
     print('Appended %i realizations to %s' % (len(realizations), fname))
-    print('Ruptures are in %s' % home+project_name+'/ruptures')
+    print('Ruptures are in %s' % home+project_name+'/output/ruptures')
     
     # end of generate_ruptures
     
