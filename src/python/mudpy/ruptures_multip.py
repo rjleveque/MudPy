@@ -166,7 +166,10 @@ def generate_one_rupture(realization,Dstrike,Ddip,vel_mod_file,velmod,whole_faul
     
     #Sucess criterion
     success=False
-    while success==False:
+    maxiters = 200  # is this reasonable to avoid infinite loop??
+    iters = 0
+    while iters<maxiters and not success:
+        iters += 1  # increment counter
         #Select only a subset of the faults based on magnitude scaling
         
         ifaults,hypo_fault,Lmax,Wmax,Leff,Weff=fakequakes.select_faults(whole_fault,Dstrike,Ddip,current_target_Mw,num_modes,scaling_law,
@@ -272,6 +275,7 @@ def generate_one_rupture(realization,Dstrike,Ddip,vel_mod_file,velmod,whole_faul
             if slip.max() > max_slip_tolerance*max_slip_from_rule:
                 success = False
                 print('... ... ... max slip condition violated max_slip_rule, recalculating...')
+                print('... ... ...     slip.max() = %g' % slip.max())
         
         #Force to target magnitude
         if force_magnitude==True:
@@ -288,6 +292,13 @@ def generate_one_rupture(realization,Dstrike,Ddip,vel_mod_file,velmod,whole_faul
             success=False
             print('... ... ... max slip condition violated due to force_magnitude=True, recalculating...')
     
+    print('+++ Required %i iterations' % iters)
+    if not success:
+        print('*** Stopping after %i attempts' % maxiters)
+        print('*** Final slip.max() = %g, max_slip = %g' \
+              % (slip.max(),max_slip))
+        # should fail more gracefully??
+        return
     
     #Get stochastic rake vector
     stoc_rake=fakequakes.get_stochastic_rake(rake,len(slip))
