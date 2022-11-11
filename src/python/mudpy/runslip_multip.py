@@ -244,6 +244,7 @@ def make_green_one_subfault(ksource,home,project_name,station_file,
         command=split("fk.pl -M"+model_name+"/"+depth+"/f -N"+str(NFFT) \
                     +"/"+str(dt)+'/1/'+repr(dk)+' -P'+repr(pmin)+'/' \
                     +repr(pmax)+'/'+repr(kmax)+diststr)
+        #print('+++fk command = ',command)
         p=subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                            env=mud_env)
         #print('Popen Process %i will run fk on subfault %i' \
@@ -278,9 +279,10 @@ def make_green_one_subfault(ksource,home,project_name,station_file,
     #print('Popen Process %i done running fk on subfault %i' \
     #        % (p.pid,source[ksource,0]))
             
-    ppool = current_process()
-    print('Pool  Process %i done working on subfault %i' \
-            % (ppool.pid, source[ksource,0]))
+    if 0:
+        ppool = current_process()
+        print('Pool  Process %i done working on subfault %i' \
+                % (ppool.pid, source[ksource,0]))
     # end of make_green_one_subfault
 
 
@@ -577,6 +579,7 @@ def make_synthetics_one_subfault(one_source,home,project_name,station_file,
     from os import remove
     from multiprocessing import current_process
     
+    print('+++ in make_synthetics_one_subfault with time_epi = %g' % time_epi)
 
     #Constant parameters
     rakeDS=90+beta #90 is thrust, -90 is normal
@@ -699,6 +702,7 @@ def make_synthetics_one_subfault(one_source,home,project_name,station_file,
 
             # The grn files are no longer needed:
             grn_files = glob(diststr+'.grn.*')
+            print('+++ can now remove *.grn.* files?')
             print('+++ Removing: ',grn_files)
             for f in grn_files:
                 silentremove(f)
@@ -1130,7 +1134,7 @@ def make_parallel_synthetics_multip(home,project_name,station_file,
             strdepth = '%.4f' % source[ksource,3]
             green_path=home+project_name+'/GFs/dynamic/'+ \
                         "%s_%s.sub%s/" % (model_name,strdepth,num)
-            print('+++ Reading from green_path = ',green_path)
+            #print('+++ Reading from green_path = ',green_path)
             col = 0
             for D in ['SS','DS']:
                 for c in ['n','e','z']:
