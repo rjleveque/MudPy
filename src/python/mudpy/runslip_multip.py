@@ -1152,12 +1152,20 @@ def make_parallel_synthetics_multip(home,project_name,station_file,
         print('Can now delete ', dirnames)
     
          
-#Compute GFs for the ivenrse problem            
+#Compute GFs for the inverse problem (also used for GNSS output)
+
 def inversionGFs(home,project_name,GF_list,tgf_file,fault_name,model_name,
         dt,tsun_dt,NFFT,tsunNFFT,green_flag,synth_flag,dk,pmin,
-        pmax,kmax,beta,time_epi,hot_start,ncpus,custom_stf,impulse=False):
+        pmax,kmax,beta,time_epi,hot_start,ncpus,custom_stf,impulse=False,
+        single_station=None):
     '''
-    This routine will read a .gflist file and compute the required GF type for each station
+    This routine will read a .gflist file and compute the required 
+    GF type for each station in the file.
+
+    If single_station is a string, it will only work on this station, 
+    provided it is found in the .gflist file.  
+    (Introduced for use with multiprocessing.Pool)
+    
     '''
     from numpy import genfromtxt,where,loadtxt,shape,floor
     from os import remove
@@ -1170,6 +1178,21 @@ def inversionGFs(home,project_name,GF_list,tgf_file,fault_name,model_name,
     stations = array(stations, ndmin=1) # in case only one station
     GF=genfromtxt(gf_file,usecols=[1,2,3,4,5,6,7],skip_header=1,dtype='f8')
     GF = array(GF, ndmin=2) # in case only one station
+
+    if single_station:
+        if single_station in stations:
+            try:
+                k = stations.index(single_station)
+            except:
+                print('*** Did not find station %s in %s' \
+                      % (single_station, gf_file))
+                print('*** Giving up')
+                return
+            stations = [single_station]
+            GF = array(GF[k,:], ndmin=2)
+            #print('+++ stations = ',stations)
+            #print('+++ GF = ',GF)
+
     fault_file=home+project_name+'/data/model_info/'+fault_name  
     source=loadtxt(fault_file,ndmin=2)
     num_faults=shape(source)[0]
