@@ -11,8 +11,8 @@ fkdir = '%s/src/fk/' % MUD
 mud_env = os.environ.copy()
 mud_env['PATH'] = mud_env['PATH'] + ':' + fkdir
 mud_env['PYTHONPATH'] = mud_env['PYTHONPATH'] + ':' + '%s/src/python' % MUD
-print('+++ Will call Popen with PATH = ',mud_env['PATH'])
-print('+++ and PYTHONPATH = ',mud_env['PYTHONPATH'])
+#print('+++ Will call Popen with PATH = ',mud_env['PATH'])
+#print('+++ and PYTHONPATH = ',mud_env['PYTHONPATH'])
 
 
 #Initalize project folders
@@ -208,7 +208,7 @@ def make_green_one_subfault(ksource,home,project_name,station_file,
     
     #print('+++ in make_green_one_subfault, ksource = %i' % ksource)
     ppool = current_process()
-    print('Pool  Process %i now working on subfault %i' \
+    print('Pool Process %i now making GFs for subfault %i' \
             % (ppool.pid, source[ksource,0]))
     
     #Where should I be working boss?
@@ -579,7 +579,7 @@ def make_synthetics_one_subfault(one_source,home,project_name,station_file,
     from os import remove
     from multiprocessing import current_process
     
-    print('+++ in make_synthetics_one_subfault with time_epi = %g' % time_epi)
+    #print('+++ in make_synthetics_one_subfault with time_epi = %g' % time_epi)
 
     #Constant parameters
     rakeDS=90+beta #90 is thrust, -90 is normal
@@ -702,8 +702,8 @@ def make_synthetics_one_subfault(one_source,home,project_name,station_file,
 
             # The grn files are no longer needed:
             grn_files = glob(diststr+'.grn.*')
-            print('+++ can now remove *.grn.* files?')
-            print('+++ Removing: ',grn_files)
+            #print('+++ can now remove *.grn.* files?')
+            #print('+++ Removing: ',grn_files)
             for f in grn_files:
                 silentremove(f)
 
@@ -1016,8 +1016,8 @@ def make_synthetics_one_subfault(one_source,home,project_name,station_file,
         DSdf.beta=staticsDS[:,3]
         DSdf.to_csv(green_path+'subfault'+num+'.DS.static.neu',sep='\t',index=False,header=False)
 
-    print('Pool  Process %i done working on subfault %i' \
-            % (ppool.pid, source[0]))
+    #print('Pool  Process %i done working on subfault %i' \
+    #        % (ppool.pid, source[0]))
                         
     # end of make_synthetics_one_subfault
 
